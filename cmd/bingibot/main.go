@@ -17,21 +17,21 @@ func main() {
     err := viper.ReadInConfig()
 
     if err != nil {
-        log.Fatalf("Error reading config file.")
+        log.Fatal("Error reading config file.")
     }
 
     token, ok := viper.Get("DISCORD_TOKEN").(string)
 
     if !ok {
-        log.Fatalf("Invalid token.")
+        log.Fatal("Invalid key.")
     }
 
     discord, err := discordgo.New("Bot " + token)
-
+        
     if err != nil {
-        log.Fatal("Invalid authentication.")
+        log.Fatal("Invalid token.")
     }
-
+    discord.StateEnabled = true
     discord.AddHandler(pingpong)
     discord.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
         if h, ok := commands.CommandHandlers[i.ApplicationCommandData().Name]; ok {
@@ -48,7 +48,7 @@ func main() {
     }
 
     fmt.Printf("Logged in as: %v#%v", discord.State.User.Username, discord.State.User.Discriminator)
-
+    
     registeredCommands := make([]*discordgo.ApplicationCommand, len(commands.Commands))
     for i, v := range commands.Commands {
         cmd, err := discord.ApplicationCommandCreate(discord.State.User.ID, "", v)
