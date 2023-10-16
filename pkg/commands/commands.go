@@ -1,61 +1,123 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-type tile struct {
-	name string
-	archiveDuration int
-	content string
+type Tile struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 var (
-	Tiles = []*tile{
+	client    = &http.Client{}
+	intOptionMinVal = 1.0
+
+	Commands = []*discordgo.ApplicationCommand{
 		{
-			name: "500 Herbi KC",
-			archiveDuration: 0,
-			content: "Get 500 Herbibore KC.",
-		},
-		{
-			name: "1k Tithe Farm Points",
-			archiveDuration: 0,
-			content: "Get 1000 points in the Tithe Farm minigame.",
+			Name:        "setup",
+			Description: "setup bingo team channels.",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "num-of-teams",
+					Description: "number of team channels to create",
+					MinValue:    &intOptionMinVal,
+					MaxValue:    99,
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionAttachment,
+					Name:        "tiles-list",
+					Description: "upload the JSON file containing the bingo tiles",
+					Required:    true,
+				},
+			},
 		},
 	}
 
-	Commands = []*discordgo.ApplicationCommand {
-		{
-			Name: "create",
-			Description: "create a channel",
-		},
-	}
+	CommandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+		"setup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			// create a deferred response while bot works
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+			})
 
-	CommandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		"create": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			fmt.Printf("\n/create [Guild: %v]", i.GuildID)
-			ch, err := s.GuildChannelCreate(i.GuildID, "test", discordgo.ChannelTypeGuildForum)
+			var tiles []*Tile
+			var numOfTeams int
+			cmdData := i.ApplicationCommandData().Options
+			configFile := i.ApplicationCommandData().Resolved.Attachments
+			options := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(cmdData))
 
-			if err != nil {
-				log.Fatalf("Failed to create channel: %v", err.Error())
+			for _, opt := range cmdData {
+				options[opt.Name] = opt
 			}
 
-			for _, v := range Tiles {
-				_, err := s.ForumThreadStart(ch.ID, v.name, v.archiveDuration, v.content)
+			if option, ok := options["num-of-teams"]; ok {
+				numOfTeams = int(option.IntValue())
+			} // extract value from cmdData. Seems unecessarily complex.
+
+			for _, file := range configFile {
+				req, err := http.NewRequest("GET", file.URL, nil) // after uploading file to cdn.discord, fetch it 
+				req.Header.Add("Content-Type", "application/json")
 
 				if err != nil {
-					log.Fatalf("Failed to create post %v in <#%v>", v.name, ch.ID)
+					log.Printf("Error: %v", err)
 				}
-			}
 
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData {
-					Content: fmt.Sprintf("Channel <#%v> created.", ch.ID),
-				},
+				res, err := client.Do(req)
+
+				if err != nil {
+					log.Printf("Error: %v", err)
+				}
+
+				body, err := io.ReadAll(res.Body)
+
+				if err != nil {
+					log.Printf("Error: %v", err)
+				}
+
+				err = json.Unmarshal(body, &tiles)
+
+				if err != nil {
+					log.Printf("Error: %v", err)
+				}
+
+				for _, tile := range tiles {
+					fmt.Printf("\n%v\n", tile)
+				}
+			} // are all these err checks really necessary?
+
+			index := 1
+			for index <= numOfTeams {
+				chName := fmt.Sprintf("team-%v", index)
+				ch, err := s.GuildChannelCreate(i.GuildID, chName, discordgo.ChannelTypeGuildForum)
+
+				if err != nil {
+					log.Fatalf("Failed to create channel: %v", err)
+				}
+
+				for _, tile := range tiles {
+					thread, err := s.ForumThreadStart(ch.ID, tile.Name, 0, tile.Description)
+
+					if err != nil {
+						log.Fatalf("Failed to create thread: %v", thread.ID)
+					}
+				}
+
+				index++
+			}
+			// create interaction response and update deferred response
+			deferredMsg := fmt.Sprintf("teams created: %v", numOfTeams)
+
+			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Content: &deferredMsg,
 			})
 		},
 	}

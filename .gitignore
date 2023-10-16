@@ -22,3 +22,6 @@ go.work
 
 # Configuration files
 .env
+
+# Test files
+*.json
