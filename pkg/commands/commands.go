@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -16,7 +17,7 @@ type Tile struct {
 }
 
 var (
-	client    = &http.Client{}
+	client          = &http.Client{}
 	intOptionMinVal = 1.0
 
 	Commands = []*discordgo.ApplicationCommand{
@@ -44,6 +45,7 @@ var (
 
 	CommandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 		"setup": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			start := time.Now()
 			// create a deferred response while bot works
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
@@ -64,7 +66,7 @@ var (
 			} // extract value from cmdData. Seems unecessarily complex.
 
 			for _, file := range configFile {
-				req, err := http.NewRequest("GET", file.URL, nil) // after uploading file to cdn.discord, fetch it 
+				req, err := http.NewRequest("GET", file.URL, nil) // after uploading file to cdn.discord, fetch it
 				req.Header.Add("Content-Type", "application/json")
 
 				if err != nil {
@@ -94,24 +96,25 @@ var (
 				}
 			} // are all these err checks really necessary?
 
-			index := 1
-			for index <= numOfTeams {
-				chName := fmt.Sprintf("team-%v", index)
-				ch, err := s.GuildChannelCreate(i.GuildID, chName, discordgo.ChannelTypeGuildForum)
-
-				if err != nil {
-					log.Fatalf("Failed to create channel: %v", err)
-				}
-
-				for _, tile := range tiles {
-					thread, err := s.ForumThreadStart(ch.ID, tile.Name, 0, tile.Description)
+			for j := 1; j <= numOfTeams; j++ {
+				go func(name int) {
+					chName := fmt.Sprintf("team-%v", name)
+					ch, err := s.GuildChannelCreate(i.GuildID, chName, discordgo.ChannelTypeGuildForum)
 
 					if err != nil {
-						log.Fatalf("Failed to create thread: %v", thread.ID)
+						log.Fatalf("Failed to create channel: %v", err)
 					}
-				}
 
-				index++
+					log.Printf("%v\n", ch.Name)
+
+					for _, tile := range tiles {
+						thread, err := s.ForumThreadStart(ch.ID, tile.Name, 0, tile.Description)
+
+						if err != nil {
+							log.Fatalf("Failed to create thread: %v", thread.ID)
+						}
+					}
+				}(j)
 			}
 			// create interaction response and update deferred response
 			deferredMsg := fmt.Sprintf("teams created: %v", numOfTeams)
@@ -119,6 +122,8 @@ var (
 			s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 				Content: &deferredMsg,
 			})
+			elapsed := time.Since(start).Seconds()
+			fmt.Printf("\n%.2fs\n", elapsed)
 		},
 	}
 )
